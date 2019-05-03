@@ -17,7 +17,11 @@
 	</properties>
 
 	<dependencies>
-
+		<dependency>
+			<groupId>org.jetbrains.kotlinx</groupId>
+			<artifactId>kotlinx-coroutines-core</artifactId>
+			<version>1.2.1</version>
+		</dependency>
 		<dependency>
 			<groupId>io.vertx</groupId>
 			<artifactId>vertx-lang-kotlin</artifactId>
@@ -36,6 +40,11 @@
 		<dependency>
 			<groupId>io.vertx</groupId>
 			<artifactId>vertx-web-client</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.vertx</groupId>
+			<artifactId>vertx-hazelcast</artifactId>
 			<version>${project.version}</version>
 		</dependency>
 		<dependency>
@@ -99,7 +108,7 @@
 							<goal>shade</goal>
 						</goals>
 						<configuration>
-							<finalName>kotlin-kmongo-coroutines-iv</finalName>
+							<finalName>vertx-kotlin-coroutune-iv</finalName>
 							<createDependencyReducedPom>false</createDependencyReducedPom>
 							<transformers>
 								<transformer
