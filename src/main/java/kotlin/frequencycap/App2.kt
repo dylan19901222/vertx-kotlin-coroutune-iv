@@ -24,25 +24,23 @@ import org.litote.kmongo.coroutine.*
 import kotlinx.coroutines.channels.*
 import java.time.LocalDateTime
 import java.util.Calendar
-import io.vertx.core.shareddata.AsyncMap
 import io.vertx.core.impl.VertxInternal
 import io.vertx.core.spi.cluster.ClusterManager
 import io.vertx.core.eventbus.impl.clustered.ClusteredEventBus
 import io.vertx.core.shareddata.SharedData
 import kotlin.frequencycap.UserAdLogHolder
 import java.util.concurrent.ConcurrentHashMap
-import io.vertx.core.Vertx
-import io.vertx.kotlin.redis.*
-import io.vertx.redis.RedisClient
-import io.vertx.redis.RedisOptions
+import java.util.Map
 
-class App : CoroutineVerticle() {
+class App2 : CoroutineVerticle() {
 
 	private lateinit var client: CoroutineClient
 	private lateinit var adCon: CoroutineCollection<Advertisement>
 	private lateinit var userAdLogExpCon: CoroutineCollection<UserAdLogExp>
 	private lateinit var adList: List<Advertisement>
 	private val findAdTaskDelay = 60000L
+	//	private lateinit var userAdLogHolder: UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>
+//	private lateinit var userAdLogMap: ConcurrentHashMap<String, ConcurrentHashMap<Id<Advertisement>, Int>>
 	private final val DEFAULT_CLUSTER_NAME: String = "__vertx.cluster"
 	private final val USER_AD_LOG_HOLDER_NAME: String = "__vertx.userAdLogHolder"
 
@@ -95,15 +93,16 @@ class App : CoroutineVerticle() {
 		// Start the server
 		vertx.createHttpServer()
 			.requestHandler(router)
-			.listenAwait(config.getInteger("http.port", 8080))
+			.listenAwait(config.getInteger("http.port", 8081))
 
 	}
 
 	// get advertisement
 	suspend fun advertisement(ctx: RoutingContext) {
+
 		try {
 			val userId: String = ctx.getBodyAsJson().getString("userId")
-//			println(userId)
+			println(userId)
 			//以使用者找出所有使用者對應廣告log
 			val userAdLogExpList: List<UserAdLogExp> = userAdLogExpCon.find(UserAdLogExp::userId eq userId).toList()
 
@@ -124,6 +123,7 @@ class App : CoroutineVerticle() {
 			//判別此使用者是否已有此則廣告使用狀況，如有，將 currentCapNum + 1 及判斷是否超過可使用量，如沒有，新增使用者對應廣告log
 			if (getUserAdLogMap().containsKey(userId) && ad.capNum > 1) {
 				var innerMap = getUserAdLogMap().get(userId)
+				println(innerMap.containsKey(adId))
 				if (innerMap.containsKey(adId)) {
 					val currNum = innerMap.get(adId)!! + 1
 					innerMap.put(adId, currNum)
@@ -146,6 +146,8 @@ class App : CoroutineVerticle() {
 				cal.add(Calendar.MINUTE, ad.capIntervalMin)
 				userAdLogExpCon.insertOne(UserAdLogExp(ad._id, userId, cal))
 			}
+			println("2")
+			println(getUserAdLogMap())
 
 			ctx.response().end(json {
 				obj("title" to ad.title, "url" to ad.url).encode()
@@ -156,44 +158,21 @@ class App : CoroutineVerticle() {
 		}
 	}
 
-//	suspend fun getRedis() {
-//		var host = Vertx.currentContext().config().getString("host")
-//		if (host == null) {
-//			host = "127.0.0.1"
-//		}
-//		// Create the redis client
-//		var client = RedisClient.create(
-//			vertx, RedisOptions(
-//				host = host
-//			)
-//		)
-//		client.selectAwait(1)
-//	}
-
 	suspend fun getShardData(): MutableMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>> {
 		val sd: SharedData = vertx.sharedData()
 		val shardData =
 			sd.getLocalMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>>(
 				DEFAULT_CLUSTER_NAME
 			)
-//
-//		sd.getAsyncMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>>(
-//			USER_AD_LOG_HOLDER_NAME,
-//			{ res ->
-//				if (res.succeeded()) {
-//					val map = res.result()
-//					map.get(USER_AD_LOG_HOLDER_NAME, { res2 -> println(res2.result()) })
-//					println(shardData.get(USER_AD_LOG_HOLDER_NAME))
-//					map.put(
-//						USER_AD_LOG_HOLDER_NAME,
-//						shardData.get(USER_AD_LOG_HOLDER_NAME),
-//						{ res2 -> println(res2.result()) })
-//					map.get(USER_AD_LOG_HOLDER_NAME, { res2 -> println(res2.result()) })
-//					println("123")
-//				} else {
-//					println("getAsyncMap Error")
-//				}
-//			})
+		println("vertx.isClustered2  = " + vertx.isClustered)
+		if (vertx.isClustered) {
+			val clusterManager: ClusterManager = (vertx as VertxInternal).clusterManager
+			val syncMap =
+				clusterManager.getSyncMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>>(
+					USER_AD_LOG_HOLDER_NAME
+				) // shared distributed map
+			return syncMap
+		}
 
 		return shardData
 	}
@@ -204,8 +183,23 @@ class App : CoroutineVerticle() {
 			return shardData.get(USER_AD_LOG_HOLDER_NAME)!!
 		} else {
 			shardData.put(USER_AD_LOG_HOLDER_NAME, UserAdLogHolder())
-			return shardData.get(USER_AD_LOG_HOLDER_NAME)!!
+			return UserAdLogHolder()
 		}
+//		vertx.sharedData().getAsyncMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>>(
+//			USER_AD_LOG_HOLDER_NAME,
+//			{ res ->
+//				if (res.succeeded()) {
+//					val map = res.result()
+//					map.get(USER_AD_LOG_HOLDER_NAME, { res2 -> println(res2.result()) })
+//					map.put(USER_AD_LOG_HOLDER_NAME, UserAdLogHolder(), { res2 -> println(res2.result()) })
+//					map.get(USER_AD_LOG_HOLDER_NAME, { res2 -> println(res2.result()) })
+//
+//					// Successfully put the value
+//				} else {
+//					println("getAsyncMap Error")
+//				}
+//			})
+//		return UserAdLogHolder()
 	}
 
 	suspend fun putUserAdLogMap(key: String, value: ConcurrentHashMap<Id<Advertisement>, Int>) {
@@ -214,6 +208,19 @@ class App : CoroutineVerticle() {
 		holder.put(key, value)
 		shardData.put(USER_AD_LOG_HOLDER_NAME, holder)
 	}
+
+//		val clusterManager: ClusterManager = (vertx as VertxInternal).clusterManager
+//		val syncMap = clusterManager.getSyncMap<String, MutableMap<String, MutableMap<Id<Advertisement>, Int>>>(
+//			DEFAULT_CLUSTER_SYNC_MAP_NAME
+//		) // shared distributed map
+//
+//		if (!syncMap.contains("userAdLogMap")) {
+//			syncMap.put("userAdLogMap", mutableMapOf())
+//		}
+////		vertx.eventBus().send()
+//		println(syncMap.get("userAdLogMap"))
+//		return syncMap.get("userAdLogMap")!!
+//}
 
 
 	//generator ad test data

@@ -16,7 +16,14 @@ suspend fun main() {
 				if (res.succeeded()) {
 					println(res.result())
 				} else {
-					println("Deployment failed!")
+					println("App Deployment failed!")
+				}
+			});
+			cluster.result().deployVerticle("frequencycap.App2", { res ->
+				if (res.succeeded()) {
+					println(res.result())
+				} else {
+					println("App2 Deployment failed!")
 				}
 			});
 		} else {
@@ -26,6 +33,7 @@ suspend fun main() {
 //	val vertx = Vertx.vertx()
 //	try {
 //		vertx.deployVerticleAwait("frequencycap.App")
+//		vertx.deployVerticleAwait("frequencycap.App2")
 //		println("Application started")
 //	} catch (exception: Throwable) {
 //		println("Could not start application")
