@@ -38,7 +38,7 @@ AppRedis(redis)
     "capNum":3
 }
 ```
-使用者不可取用廣告紀錄，[expireAt 欄位需設定 Indexes] ，使 MongoDB 自行判斷過期時間，及 userId 欄位也需設定 Indexes ，增加尋找使用者不可紀錄時效率
+使用者不可取用廣告紀錄，[expireAt 欄位需設定 Indexes] ，使 MongoDB 自行判斷過期時間，及 userId 欄位也需設定 Indexes ，增加尋找使用者不可取用廣告紀錄效率
 ```json
 {
   "_id" : "ObjectId(5ccd3f20f6cbea054b6f96d7)",
