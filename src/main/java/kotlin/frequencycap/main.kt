@@ -8,7 +8,7 @@ suspend fun main() {
 	val vertx = Vertx.vertx()
 	try {
 		vertx.deployVerticleAwait("frequencycap.App")
-		vertx.deployVerticleAwait("frequencycap.App2")
+		vertx.deployVerticleAwait("frequencycap.AppRedis")
 		println("Application started")
 	} catch (exception: Throwable) {
 		println("Could not start application")

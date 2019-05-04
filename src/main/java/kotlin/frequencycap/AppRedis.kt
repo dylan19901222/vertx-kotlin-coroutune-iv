@@ -35,14 +35,16 @@ import io.vertx.core.Vertx
 import io.vertx.kotlin.redis.*
 import io.vertx.redis.RedisClient
 import io.vertx.redis.RedisOptions
+import io.vertx.core.json.JsonArray
 
-class App2 : CoroutineVerticle() {
+class AppRedis : CoroutineVerticle() {
 
 	private lateinit var client: CoroutineClient
 	private lateinit var adCon: CoroutineCollection<Advertisement>
 	private lateinit var userAdLogExpCon: CoroutineCollection<UserAdLogExp>
 	private lateinit var adList: List<Advertisement>
 	private val findAdTaskDelay = 60000L
+	private lateinit var redisClient : RedisClient
 	private final val LOCAL_MAP_NAME: String = "__vertx.localMap"
 	private final val USER_AD_LOG_HOLDER_NAME: String = "__vertx.userAdLogHolder"
 
@@ -71,12 +73,15 @@ class App2 : CoroutineVerticle() {
 	data class UserAdLog(val adId: Id<Advertisement>, val currNum: Int)
 
 	override suspend fun start() {
-
+		createRedisClient()
 		client = KmogoVertxManager(vertx, "ds").createShared()
 		val database: CoroutineDatabase = client.getDatabase("test")
 		adCon = database.getCollection<Advertisement>()
 		userAdLogExpCon = database.getCollection<UserAdLogExp>()
-		
+
+		//測試資料生成
+		this.generatorAdvertisement(3, 5, 5)
+		adList = adCon.find().toList()
 		//每1分鐘重撈廣告資料，將廣告資料暫存記憶體，減少 io 存取
 		val tickerChannel = ticker(delayMillis = findAdTaskDelay, initialDelayMillis = 0)
 		launch {
@@ -98,16 +103,14 @@ class App2 : CoroutineVerticle() {
 
 	// get advertisement
 	suspend fun advertisement(ctx: RoutingContext) {
+
 		try {
 			val userId: String = ctx.getBodyAsJson().getString("userId")
-			
-			//以使用者找出所有使用者對應廣告log
-			val userAdLogExpList: List<UserAdLogExp> = userAdLogExpCon.find(UserAdLogExp::userId eq userId).toList()
 
-			//過濾掉已不能使用的廣告並轉換成 id List
-			val values: List<Id<Advertisement>> = userAdLogExpList.map { userAdLogExp -> userAdLogExp.adId }.toList()
-
-			val resultList: List<Advertisement> = adList.filter { ad -> !values.contains(ad._id) }.toList()
+			//redis 改法
+			val mutableList = findUserAdLogExpire(userId)
+			val values: List<String> = mutableList.map { x -> x.toString().split("∥")[1] }.toList()
+			val resultList: List<Advertisement> = adList.filter { ad -> !values.contains(ad._id.toString()) }.toList()
 
 			//如果沒廣告可播放回傳404
 			if (resultList.size == 0) {
@@ -139,9 +142,8 @@ class App2 : CoroutineVerticle() {
 
 			//如已不能使用，將此筆 log 加入資料庫
 			if (enable) {
-				val cal: Calendar = Calendar.getInstance()
-				cal.add(Calendar.MINUTE, ad.capIntervalMin)
-				userAdLogExpCon.insertOne(UserAdLogExp(ad._id, userId, cal))
+				//redis寫法
+				setUserAdLogExpire(userId +"∥"+ ad._id.toString(), ad.capIntervalMin * 60L)
 			}
 
 			ctx.response().end(json {
@@ -151,6 +153,31 @@ class App2 : CoroutineVerticle() {
 			e.printStackTrace()
 			ctx.response().setStatusCode(404).end()
 		}
+	}
+
+	suspend fun createRedisClient() {
+		// If a config file is set, read the host and port.
+		var host = Vertx.currentContext().config().getString("host")
+		if (host == null) {
+			host = "127.0.0.1"
+		}
+
+		// Create the redis client
+		redisClient = RedisClient.create(
+			vertx, RedisOptions(
+				host = host
+			)
+		)
+		
+	}
+
+	suspend fun findUserAdLogExpire(userId: String): JsonArray {
+		return redisClient.keysAwait(userId + "*")
+	}
+
+	suspend fun setUserAdLogExpire(key: String, sec: Long) {
+		redisClient.setAwait(key, key)
+		redisClient.expireAwait(key, sec)
 	}
 
 	suspend fun getShardData(): MutableMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>> {

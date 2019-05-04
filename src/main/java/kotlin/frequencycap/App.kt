@@ -76,9 +76,6 @@ class App : CoroutineVerticle() {
 		val database: CoroutineDatabase = client.getDatabase("test")
 		adCon = database.getCollection<Advertisement>()
 		userAdLogExpCon = database.getCollection<UserAdLogExp>()
-
-		//測試資料生成
-		this.generatorAdvertisement(3, 3, 3)
 		
 		//每1分鐘重撈廣告資料，將廣告資料暫存記憶體，減少 io 存取
 		val tickerChannel = ticker(delayMillis = findAdTaskDelay, initialDelayMillis = 0)
