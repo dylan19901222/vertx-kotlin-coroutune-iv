@@ -35,7 +35,7 @@
 使用者不可取用廣告紀錄，[expireAt 欄位需設定 Indexes] ，使 MongoDB 自行判斷過期時間，及 userId 欄位也需設定 Indexes ，增加尋找使用者不可紀錄時效率
 ```json
 {
-	"_id" : "<font color="#dd0000">ObjectId(5ccd3f20f6cbea054b6f96d7)</font>",
+	"_id" : "ObjectId(5ccd3f20f6cbea054b6f96d7)",
 	"adId(廣告ObjectId)" : "ObjectId(5ccd3efdf6cbea054b6f96d4)",
 	"userId(使用者id)" : "b8143b3a-4815-47aa-8b10-8086d3330adc",
 	"expireAt(過期時間)" : "ISODate(2019-05-04T07:31:32.946Z)"
