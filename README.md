@@ -5,7 +5,7 @@
 
 > 先將 db 中 10000 筆廣告資料取出暫存記憶體，並設置 [TimeTask 1 分鐘做撈取廣告資料動作]，以減少 db io 存取行為(預設情況為廣告資料非頻繁變動)。
 
-> 當使用者對 API 發出 request 時 ，以使用者 id 至 MongoDB collection userAdLogExp(使用者不可取用廣告紀錄)中[找出目前發出 request 的使用者所有不可取用的廣告紀錄]。
+> 當使用者對 API 發出 request 時 ，以使用者 id 至 MongoDB collection userAdLogExp(使用者不可取用廣告紀錄)中[找出目前發出 request 的使用者所有不可取用的廣告紀錄]，如硬體設備允許可將 MongoDB 中不可取用的廣告紀錄部分改用 Redis 取代做存取以提升效率。
 
 > 使用剛取出不可用紀錄所有廣告 id 做為 filter 條件與暫存在[記憶體的 10000 筆廣告資料做比對]，並從剩餘的資料中亂數取出一筆回應給使用者
 
