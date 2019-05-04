@@ -5,13 +5,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import io.vertx.core.shareddata.Shareable;
 
-public class UserAdLogHolder<K, V> implements Shareable,Serializable {
+public class UserAdLogHolder<K, V> implements Shareable, Serializable {
 
 	/**
 	 * 
 	 */
 	private static final long serialVersionUID = -3262993345897784073L;
-	
+
 	private ConcurrentHashMap<K, V> map;
 
 	public UserAdLogHolder() {

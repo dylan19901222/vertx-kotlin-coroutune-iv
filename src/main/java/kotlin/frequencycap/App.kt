@@ -43,7 +43,7 @@ class App : CoroutineVerticle() {
 	private lateinit var userAdLogExpCon: CoroutineCollection<UserAdLogExp>
 	private lateinit var adList: List<Advertisement>
 	private val findAdTaskDelay = 60000L
-	private final val DEFAULT_CLUSTER_NAME: String = "__vertx.cluster"
+	private final val LOCAL_MAP_NAME: String = "__vertx.localMap"
 	private final val USER_AD_LOG_HOLDER_NAME: String = "__vertx.userAdLogHolder"
 
 
@@ -72,14 +72,14 @@ class App : CoroutineVerticle() {
 
 	override suspend fun start() {
 
-
 		client = KmogoVertxManager(vertx, "ds").createShared()
 		val database: CoroutineDatabase = client.getDatabase("test")
 		adCon = database.getCollection<Advertisement>()
 		userAdLogExpCon = database.getCollection<UserAdLogExp>()
 
-		this.generatorAdvertisement(3, 10, 10)
-		adList = adCon.find().toList()
+		//測試資料生成
+		this.generatorAdvertisement(10000, 30, 5)
+		
 		//每1分鐘重撈廣告資料，將廣告資料暫存記憶體，減少 io 存取
 		val tickerChannel = ticker(delayMillis = findAdTaskDelay, initialDelayMillis = 0)
 		launch {
@@ -103,7 +103,7 @@ class App : CoroutineVerticle() {
 	suspend fun advertisement(ctx: RoutingContext) {
 		try {
 			val userId: String = ctx.getBodyAsJson().getString("userId")
-//			println(userId)
+			
 			//以使用者找出所有使用者對應廣告log
 			val userAdLogExpList: List<UserAdLogExp> = userAdLogExpCon.find(UserAdLogExp::userId eq userId).toList()
 
@@ -156,44 +156,12 @@ class App : CoroutineVerticle() {
 		}
 	}
 
-//	suspend fun getRedis() {
-//		var host = Vertx.currentContext().config().getString("host")
-//		if (host == null) {
-//			host = "127.0.0.1"
-//		}
-//		// Create the redis client
-//		var client = RedisClient.create(
-//			vertx, RedisOptions(
-//				host = host
-//			)
-//		)
-//		client.selectAwait(1)
-//	}
-
 	suspend fun getShardData(): MutableMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>> {
 		val sd: SharedData = vertx.sharedData()
 		val shardData =
 			sd.getLocalMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>>(
-				DEFAULT_CLUSTER_NAME
+				LOCAL_MAP_NAME
 			)
-//
-//		sd.getAsyncMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>>(
-//			USER_AD_LOG_HOLDER_NAME,
-//			{ res ->
-//				if (res.succeeded()) {
-//					val map = res.result()
-//					map.get(USER_AD_LOG_HOLDER_NAME, { res2 -> println(res2.result()) })
-//					println(shardData.get(USER_AD_LOG_HOLDER_NAME))
-//					map.put(
-//						USER_AD_LOG_HOLDER_NAME,
-//						shardData.get(USER_AD_LOG_HOLDER_NAME),
-//						{ res2 -> println(res2.result()) })
-//					map.get(USER_AD_LOG_HOLDER_NAME, { res2 -> println(res2.result()) })
-//					println("123")
-//				} else {
-//					println("getAsyncMap Error")
-//				}
-//			})
 
 		return shardData
 	}
@@ -229,8 +197,8 @@ class App : CoroutineVerticle() {
 				Advertisement(
 					"Go check it out " + i,
 					"https://domain.com/landing_page" + i,
-					(5..maxCapIntervalMin).random(),
-					(5..maxCapNum).random()
+					(3..maxCapIntervalMin).random(),
+					(3..maxCapNum).random()
 				)
 			)
 		}

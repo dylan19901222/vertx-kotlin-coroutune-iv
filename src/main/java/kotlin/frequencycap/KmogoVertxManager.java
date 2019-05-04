@@ -36,11 +36,9 @@ public class KmogoVertxManager implements Closeable {
 			LocalMap<String, MongoHolder> map = vertx.sharedData().getLocalMap(DS_LOCAL_MAP_NAME);
 			MongoHolder theHolder = map.get(datasourceName);
 			if (theHolder == null) {
-				System.out.println("theHolder is null");
 				theHolder = new MongoHolder(() -> removeFromMap(map, datasourceName));
 				map.put(datasourceName, theHolder);
 			} else {
-				System.out.println("theHolder.incRefCount()");
 				theHolder.incRefCount();
 			}
 			return theHolder;
