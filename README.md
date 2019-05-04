@@ -1,5 +1,5 @@
 ## 架構流程圖
-如下，有2份架構流程圖 App 及 AppRedis ，差別在於是否使用 redis 負責控管使用者廣告行為紀錄
+如下，有2份架構流程圖 App 及 AppRedis ，差別在於是否使用 redis 負責控管使用者不可取用廣告紀錄
 
 App
 ![flowchart](./images/flowchart.png)
