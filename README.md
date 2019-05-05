@@ -77,3 +77,5 @@ AppByMem(未實作完成)
 ### UserAdLogHolder.java
   - 實作 Shareable 使 Verticle local端 共享資源
   
+
+
