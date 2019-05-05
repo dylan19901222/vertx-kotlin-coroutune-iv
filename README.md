@@ -4,7 +4,7 @@
 App
 ![flowchart](./images/flowchart.png)
 
-AppByMem(未實作完成)
+AppInMem(未實作完成)
 ![flowchart2](./images/flowchart2.png)
 
 ## 業務邏輯實作方式(目前以local Shared Data 方式實作)
