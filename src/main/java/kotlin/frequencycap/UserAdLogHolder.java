@@ -45,11 +45,12 @@ public class UserAdLogHolder<K, V> implements Shareable, Serializable {
 		this.map = map;
 	}
 
-	public synchronized ConcurrentHashMap<K, V> getMap() {
-		if (map == null) {
-			map = new ConcurrentHashMap<>();
-		}
-		return map;
+	public synchronized void remove(K key) {
+		this.map.remove(key);
+	}
+
+	public synchronized Integer size() {
+		return this.map.size();
 	}
 
 }

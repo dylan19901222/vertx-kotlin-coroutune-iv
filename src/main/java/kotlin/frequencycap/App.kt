@@ -38,7 +38,7 @@ import io.vertx.redis.RedisOptions
 
 class App : CoroutineVerticle() {
 
-	private lateinit var client: CoroutineClient
+	private lateinit var mongoClient: CoroutineClient
 	private lateinit var adCon: CoroutineCollection<Advertisement>
 	private lateinit var userAdLogExpCon: CoroutineCollection<UserAdLogExp>
 	private lateinit var adList: List<Advertisement>
@@ -72,11 +72,13 @@ class App : CoroutineVerticle() {
 
 	override suspend fun start() {
 
-		client = KmogoVertxManager(vertx, "ds").createShared()
-		val database: CoroutineDatabase = client.getDatabase("test")
+		mongoClient = KmogoVertxManager(vertx, "ds").createShared()
+		val database: CoroutineDatabase = mongoClient.getDatabase("test")
 		adCon = database.getCollection<Advertisement>()
 		userAdLogExpCon = database.getCollection<UserAdLogExp>()
-		
+
+		//測試資料生成
+		this.generatorAdvertisement(amount = 10000, maxCapIntervalMin = 30, maxCapNum = 3)
 		//每1分鐘重撈廣告資料，將廣告資料暫存記憶體，減少 io 存取
 		val tickerChannel = ticker(delayMillis = findAdTaskDelay, initialDelayMillis = 0)
 		launch {
@@ -100,45 +102,78 @@ class App : CoroutineVerticle() {
 	suspend fun advertisement(ctx: RoutingContext) {
 		try {
 			val userId: String = ctx.getBodyAsJson().getString("userId")
-			
-			//以使用者找出所有使用者對應廣告log
+
+			//取出 shardData 中的 UserAdLogHolder
+			val userAdLogHolder: UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>> =
+				getUserAdLogHolder()
+
+			//以使用者找出所有使用者廣告期限紀錄
 			val userAdLogExpList: List<UserAdLogExp> = userAdLogExpCon.find(UserAdLogExp::userId eq userId).toList()
 
-			//過濾掉已不能使用的廣告並轉換成 id List
-			val values: List<Id<Advertisement>> = userAdLogExpList.map { userAdLogExp -> userAdLogExp.adId }.toList()
+			//將使用者廣告期限紀錄轉換成廣告 Id List
+			val adLogExpAdIds: List<Id<Advertisement>> =
+				userAdLogExpList.map { userAdLogExp -> userAdLogExp.adId }.toList()
 
-			val resultList: List<Advertisement> = adList.filter { ad -> !values.contains(ad._id) }.toList()
+			var userAdLogByUserIdMap: ConcurrentHashMap<Id<Advertisement>, Int> = ConcurrentHashMap()
+
+			//判斷 userAdLogHolder 中是否已有這位 userId
+			if (userAdLogHolder.containsKey(userId)) {
+				userAdLogByUserIdMap = userAdLogHolder.get(userId)
+			}
+			
+			//先將有此 adId ，而使用者廣告期限紀錄卻已過期的使用者廣告行為記錄移除(重新計算)
+			userAdLogByUserIdMap.forEach { entry ->
+				if (!adLogExpAdIds.contains(entry.key)) {
+					userAdLogByUserIdMap.remove(entry.key)
+				}
+			}
+
+			//1.如使用者廣告期限紀錄不含此 adId ， 使用者廣告行為記錄不含有此 adId 表示該廣告可以用[x,x -> o]
+			//2.如使用者廣告期限紀錄含此 adId ， 使用者廣告行為記錄含有此 adId 表示該廣告可以用[o,o -> x]
+			//3.如使用者廣告期限紀錄含此 adId ， 使用者廣告行為記錄不含有此 adId 表示該廣告不可以用[x,o -> o]
+			//因為使用者廣告行為記錄超過該廣告使用次數會被移除，但使用者廣告期限紀錄並還沒到時間，故上面條件3是不可使用的狀況
+			val resultList: List<Advertisement> =
+				adList.filter { ad ->
+					!(adLogExpAdIds.contains(ad._id).xor(userAdLogByUserIdMap.containsKey(ad._id)))
+				}.toList()
 
 			//如果沒廣告可播放回傳404
 			if (resultList.size == 0) {
 				ctx.response().setStatusCode(404).end()
 				return
 			}
+
+			//亂數取一筆廣告
 			val ad: Advertisement = resultList.get((0..resultList.size - 1).random())
 			val adId = ad._id
-			var enable = ad.capNum <= 1
+			var reachedCapLimit = ad.capNum <= 1
 
-			//判別此使用者是否已有此則廣告使用狀況，如有，將 currentCapNum + 1 及判斷是否超過可使用量，如沒有，新增使用者對應廣告log
-			if (getUserAdLogMap().containsKey(userId) && ad.capNum > 1) {
-				var innerMap = getUserAdLogMap().get(userId)
+			//判別此使用者是否已有此則使用者廣告行為記錄
+			//如有，將 currentCapNum + 1 及 判斷是否超過可使用量
+			//如沒有，新增此則使用者廣告行為記錄
+			if (userAdLogHolder.containsKey(userId)) {
+				var innerMap = userAdLogHolder.get(userId)
 				if (innerMap.containsKey(adId)) {
 					val currNum = innerMap.get(adId)!! + 1
 					innerMap.put(adId, currNum)
-					enable = currNum == ad.capNum
+					reachedCapLimit = currNum == ad.capNum
 				} else {
 					innerMap.put(adId, 1)
 				}
-				if (enable) {
+				if (reachedCapLimit) {
 					innerMap.remove(adId)
 				}
-			} else {
+				if (innerMap.count() == 0) {
+					userAdLogHolder.remove(userId)
+				}
+			} else if (ad.capNum > 1) {
 				val cMap = ConcurrentHashMap<Id<Advertisement>, Int>()
 				cMap.put(adId, 1)
-				putUserAdLogMap(userId, cMap)
+				putUserAdLogToUserAdLogHolder(userId, cMap)
 			}
 
-			//如已不能使用，將此筆 log 加入資料庫
-			if (enable) {
+			//如使用者廣告期限紀錄沒有此筆使用者對應的廣告資料，新增此筆使用者廣告期限紀錄
+			if (!adLogExpAdIds.contains(adId)) {
 				val cal: Calendar = Calendar.getInstance()
 				cal.add(Calendar.MINUTE, ad.capIntervalMin)
 				userAdLogExpCon.insertOne(UserAdLogExp(ad._id, userId, cal))
@@ -163,7 +198,7 @@ class App : CoroutineVerticle() {
 		return shardData
 	}
 
-	suspend fun getUserAdLogMap(): UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>> {
+	suspend fun getUserAdLogHolder(): UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>> {
 		var shardData = getShardData()
 		if (shardData.containsKey(USER_AD_LOG_HOLDER_NAME)) {
 			return shardData.get(USER_AD_LOG_HOLDER_NAME)!!
@@ -173,7 +208,7 @@ class App : CoroutineVerticle() {
 		}
 	}
 
-	suspend fun putUserAdLogMap(key: String, value: ConcurrentHashMap<Id<Advertisement>, Int>) {
+	suspend fun putUserAdLogToUserAdLogHolder(key: String, value: ConcurrentHashMap<Id<Advertisement>, Int>) {
 		val shardData = getShardData()
 		val holder = shardData.get(USER_AD_LOG_HOLDER_NAME)!!
 		holder.put(key, value)
@@ -194,8 +229,8 @@ class App : CoroutineVerticle() {
 				Advertisement(
 					"Go check it out " + i,
 					"https://domain.com/landing_page" + i,
-					(3..maxCapIntervalMin).random(),
-					(3..maxCapNum).random()
+					(1..maxCapIntervalMin).random(),
+					(1..maxCapNum).random()
 				)
 			)
 		}

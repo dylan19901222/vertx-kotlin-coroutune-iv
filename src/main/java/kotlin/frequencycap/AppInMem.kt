@@ -35,16 +35,14 @@ import io.vertx.core.Vertx
 import io.vertx.kotlin.redis.*
 import io.vertx.redis.RedisClient
 import io.vertx.redis.RedisOptions
-import io.vertx.core.json.JsonArray
 
-class AppRedis : CoroutineVerticle() {
+class AppInMem : CoroutineVerticle() {
 
-	private lateinit var client: CoroutineClient
+	private lateinit var mongoClient: CoroutineClient
 	private lateinit var adCon: CoroutineCollection<Advertisement>
 	private lateinit var userAdLogExpCon: CoroutineCollection<UserAdLogExp>
 	private lateinit var adList: List<Advertisement>
 	private val findAdTaskDelay = 60000L
-	private lateinit var redisClient : RedisClient
 	private final val LOCAL_MAP_NAME: String = "__vertx.localMap"
 	private final val USER_AD_LOG_HOLDER_NAME: String = "__vertx.userAdLogHolder"
 
@@ -73,15 +71,14 @@ class AppRedis : CoroutineVerticle() {
 	data class UserAdLog(val adId: Id<Advertisement>, val currNum: Int)
 
 	override suspend fun start() {
-		createRedisClient()
-		client = KmogoVertxManager(vertx, "ds").createShared()
-		val database: CoroutineDatabase = client.getDatabase("test")
+
+		mongoClient = KmogoVertxManager(vertx, "ds").createShared()
+		val database: CoroutineDatabase = mongoClient.getDatabase("test")
 		adCon = database.getCollection<Advertisement>()
 		userAdLogExpCon = database.getCollection<UserAdLogExp>()
 
 		//測試資料生成
-		this.generatorAdvertisement(3, 5, 5)
-		adList = adCon.find().toList()
+//		this.generatorAdvertisement(amount = 10000, maxCapIntervalMin = 20, maxCapNum = 3)
 		//每1分鐘重撈廣告資料，將廣告資料暫存記憶體，減少 io 存取
 		val tickerChannel = ticker(delayMillis = findAdTaskDelay, initialDelayMillis = 0)
 		launch {
@@ -103,49 +100,77 @@ class AppRedis : CoroutineVerticle() {
 
 	// get advertisement
 	suspend fun advertisement(ctx: RoutingContext) {
-
 		try {
 			val userId: String = ctx.getBodyAsJson().getString("userId")
+			var exprUserIdkey: String = userId + "expr"
 
-			//redis 改法
-			val mutableList = findUserAdLogExpire(userId)
-			val values: List<String> = mutableList.map { x -> x.toString().split("∥")[1] }.toList()
-			val resultList: List<Advertisement> = adList.filter { ad -> !values.contains(ad._id.toString()) }.toList()
+			//取出 shardData 中的 UserAdLogHolder
+			val userAdLogHolder: UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Long>> =
+				getUserAdLogHolder()
+
+			var userAdLogByUserIdMap: ConcurrentHashMap<Id<Advertisement>, Long> = ConcurrentHashMap()
+
+			//判斷 userAdLogHolder 中是否已有這位 userId 的期限資訊
+			if (userAdLogHolder.containsKey(exprUserIdkey)) {
+				userAdLogByUserIdMap = userAdLogHolder.get(exprUserIdkey)
+			}
+
+			//如使用者廣告期限紀錄已過期，移除此期限紀錄
+			userAdLogByUserIdMap.forEach { entry ->
+				if (entry.value.compareTo(System.currentTimeMillis()) < 1) {
+					userAdLogByUserIdMap.remove(entry.key)
+				}
+			}
+
+			val adLogExpAdIds: List<Id<Advertisement>> =
+				userAdLogByUserIdMap.map { entry -> entry.key }.toList()
+
+			//過濾目前不可用的廣告
+			val resultList: List<Advertisement> = adList.filter { ad -> !adLogExpAdIds.contains(ad._id) }.toList()
 
 			//如果沒廣告可播放回傳404
 			if (resultList.size == 0) {
 				ctx.response().setStatusCode(404).end()
 				return
 			}
+
+			//亂數取一筆廣告
 			val ad: Advertisement = resultList.get((0..resultList.size - 1).random())
 			val adId = ad._id
-			var enable = ad.capNum <= 1
+			var reachedCapLimit = ad.capNum <= 1
 
-			//判別此使用者是否已有此則廣告使用狀況，如有，將 currentCapNum + 1 及判斷是否超過可使用量，如沒有，新增使用者對應廣告log
-			if (getUserAdLogMap().containsKey(userId) && ad.capNum > 1) {
-				var innerMap = getUserAdLogMap().get(userId)
+			//判別此使用者是否已有此則使用者廣告行為記錄
+			//如有，將 currentCapNum + 1 及 判斷是否超過可使用量
+			//如沒有，新增此則使用者廣告行為記錄
+			if (userAdLogHolder.containsKey(userId)) {
+				var innerMap = userAdLogHolder.get(userId)
 				if (innerMap.containsKey(adId)) {
 					val currNum = innerMap.get(adId)!! + 1
 					innerMap.put(adId, currNum)
-					enable = currNum == ad.capNum
+					reachedCapLimit = currNum.compareTo(ad.capNum) == 0
 				} else {
 					innerMap.put(adId, 1)
 				}
-				if (enable) {
+				if (reachedCapLimit) {
 					innerMap.remove(adId)
 				}
-			} else {
-				val cMap = ConcurrentHashMap<Id<Advertisement>, Int>()
+				if (innerMap.count() == 0) {
+					userAdLogHolder.remove(userId)
+				}
+			} else if (ad.capNum > 1) {
+				val cMap = ConcurrentHashMap<Id<Advertisement>, Long>()
 				cMap.put(adId, 1)
-				putUserAdLogMap(userId, cMap)
+				putUserAdLogToUserAdLogHolder(userId, cMap)
 			}
 
-			//如已不能使用，將此筆 log 加入資料庫
-			if (enable) {
-				//redis寫法
-				setUserAdLogExpire(userId +"∥"+ ad._id.toString(), ad.capIntervalMin * 60L)
+			//如使用者廣告期限紀錄沒有此筆使用者對應的廣告資料，新增此筆使用者廣告期限紀錄
+			if (reachedCapLimit) {
+				val cal: Calendar = Calendar.getInstance()
+				cal.add(Calendar.MINUTE, ad.capIntervalMin)
+				userAdLogByUserIdMap.put(adId, cal.timeInMillis)
+				putUserAdLogToUserAdLogHolder(exprUserIdkey,userAdLogByUserIdMap)
 			}
-
+			
 			ctx.response().end(json {
 				obj("title" to ad.title, "url" to ad.url).encode()
 			})
@@ -155,42 +180,17 @@ class AppRedis : CoroutineVerticle() {
 		}
 	}
 
-	suspend fun createRedisClient() {
-		// If a config file is set, read the host and port.
-		var host = Vertx.currentContext().config().getString("host")
-		if (host == null) {
-			host = "127.0.0.1"
-		}
-
-		// Create the redis client
-		redisClient = RedisClient.create(
-			vertx, RedisOptions(
-				host = host
-			)
-		)
-		
-	}
-
-	suspend fun findUserAdLogExpire(userId: String): JsonArray {
-		return redisClient.keysAwait(userId + "*")
-	}
-
-	suspend fun setUserAdLogExpire(key: String, sec: Long) {
-		redisClient.setAwait(key, key)
-		redisClient.expireAwait(key, sec)
-	}
-
-	suspend fun getShardData(): MutableMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>> {
+	suspend fun getShardData(): MutableMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Long>>> {
 		val sd: SharedData = vertx.sharedData()
 		val shardData =
-			sd.getLocalMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>>>(
+			sd.getLocalMap<String, UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Long>>>(
 				LOCAL_MAP_NAME
 			)
 
 		return shardData
 	}
 
-	suspend fun getUserAdLogMap(): UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Int>> {
+	suspend fun getUserAdLogHolder(): UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Long>> {
 		var shardData = getShardData()
 		if (shardData.containsKey(USER_AD_LOG_HOLDER_NAME)) {
 			return shardData.get(USER_AD_LOG_HOLDER_NAME)!!
@@ -200,7 +200,7 @@ class AppRedis : CoroutineVerticle() {
 		}
 	}
 
-	suspend fun putUserAdLogMap(key: String, value: ConcurrentHashMap<Id<Advertisement>, Int>) {
+	suspend fun putUserAdLogToUserAdLogHolder(key: String, value: ConcurrentHashMap<Id<Advertisement>, Long>) {
 		val shardData = getShardData()
 		val holder = shardData.get(USER_AD_LOG_HOLDER_NAME)!!
 		holder.put(key, value)
@@ -221,8 +221,8 @@ class AppRedis : CoroutineVerticle() {
 				Advertisement(
 					"Go check it out " + i,
 					"https://domain.com/landing_page" + i,
-					(3..maxCapIntervalMin).random(),
-					(3..maxCapNum).random()
+					(1..maxCapIntervalMin).random(),
+					(1..maxCapNum).random()
 				)
 			)
 		}
