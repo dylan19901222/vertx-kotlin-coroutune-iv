@@ -4,7 +4,7 @@
 App
 ![flowchart](./images/flowchart.png)
 
-AppInMem(未實作完成)
+AppInMem
 ![flowchart2](./images/flowchart2.png)
 
 ## 業務邏輯實作方式(目前以local Shared Data 方式實作)
@@ -70,8 +70,8 @@ AppInMem(未實作完成)
   - 程式進入點 ， deployVerticle
 ### App.kt
   - 實作 CoroutineVerticle ， 僅使用 MongoDB 方式
-### AppInMem.kt(未完成品)
-  - 以 shardData 控管使用者廣告期限紀錄，沒意外的話，其效率較 App.kt 優秀
+### AppInMem.kt
+  - 以 shardData 控管使用者廣告期限紀錄，其效率較 App.kt 優秀，但記憶體負擔也較大
 ### KmogoVertxManager.java
   - 管控 Kmogo Client 在 ShareData 中的狀態
 ### UserAdLogHolder.java

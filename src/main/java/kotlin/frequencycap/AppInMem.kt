@@ -108,25 +108,47 @@ class AppInMem : CoroutineVerticle() {
 			val userAdLogHolder: UserAdLogHolder<String, ConcurrentHashMap<Id<Advertisement>, Long>> =
 				getUserAdLogHolder()
 
-			var userAdLogByUserIdMap: ConcurrentHashMap<Id<Advertisement>, Long> = ConcurrentHashMap()
+
+			var userAdLogExprByUserIdMap: ConcurrentHashMap<Id<Advertisement>, Long> = ConcurrentHashMap()
 
 			//判斷 userAdLogHolder 中是否已有這位 userId 的期限資訊
 			if (userAdLogHolder.containsKey(exprUserIdkey)) {
-				userAdLogByUserIdMap = userAdLogHolder.get(exprUserIdkey)
+				userAdLogExprByUserIdMap = userAdLogHolder.get(exprUserIdkey)
 			}
 
 			//如使用者廣告期限紀錄已過期，移除此期限紀錄
-			userAdLogByUserIdMap.forEach { entry ->
+			userAdLogExprByUserIdMap.forEach { entry ->
 				if (entry.value.compareTo(System.currentTimeMillis()) < 1) {
+					userAdLogExprByUserIdMap.remove(entry.key)
+				}
+			}
+			
+			val adLogExpAdIds: List<Id<Advertisement>> =
+				userAdLogExprByUserIdMap.map { entry -> entry.key }.toList()
+
+			var userAdLogByUserIdMap: ConcurrentHashMap<Id<Advertisement>, Long> = ConcurrentHashMap()
+
+			//判斷 userAdLogHolder 中是否已有這位 userId
+			if (userAdLogHolder.containsKey(userId)) {
+				userAdLogByUserIdMap = userAdLogHolder.get(userId)
+			}
+
+			//先將有此 adId ，而使用者廣告期限紀錄卻已過期的使用者廣告行為記錄移除(重新計算)
+			userAdLogByUserIdMap.forEach { entry ->
+				if (!adLogExpAdIds.contains(entry.key)) {
 					userAdLogByUserIdMap.remove(entry.key)
 				}
 			}
 
-			val adLogExpAdIds: List<Id<Advertisement>> =
-				userAdLogByUserIdMap.map { entry -> entry.key }.toList()
 
-			//過濾目前不可用的廣告
-			val resultList: List<Advertisement> = adList.filter { ad -> !adLogExpAdIds.contains(ad._id) }.toList()
+			//1.如使用者廣告期限紀錄不含此 adId ， 使用者廣告行為記錄不含有此 adId 表示該廣告可以用[x,x -> o]
+			//2.如使用者廣告期限紀錄含此 adId ， 使用者廣告行為記錄含有此 adId 表示該廣告可以用[o,o -> o]
+			//3.如使用者廣告期限紀錄含此 adId ， 使用者廣告行為記錄不含有此 adId 表示該廣告不可以用[x,o -> x]
+			//因為使用者廣告行為記錄超過該廣告使用次數會被移除，但使用者廣告期限紀錄並還沒到時間，故上面條件3是不可使用的狀況
+			val resultList: List<Advertisement> =
+				adList.filter { ad ->
+					!(adLogExpAdIds.contains(ad._id).xor(userAdLogByUserIdMap.containsKey(ad._id)))
+				}.toList()
 
 			//如果沒廣告可播放回傳404
 			if (resultList.size == 0) {
@@ -168,9 +190,9 @@ class AppInMem : CoroutineVerticle() {
 				val cal: Calendar = Calendar.getInstance()
 				cal.add(Calendar.MINUTE, ad.capIntervalMin)
 				userAdLogByUserIdMap.put(adId, cal.timeInMillis)
-				putUserAdLogToUserAdLogHolder(exprUserIdkey,userAdLogByUserIdMap)
+				putUserAdLogToUserAdLogHolder(exprUserIdkey, userAdLogByUserIdMap)
 			}
-			
+
 			ctx.response().end(json {
 				obj("title" to ad.title, "url" to ad.url).encode()
 			})

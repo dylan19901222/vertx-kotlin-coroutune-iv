@@ -9,7 +9,7 @@ suspend fun main() {
 	try {
 		vertx.deployVerticleAwait("frequencycap.App")
 		vertx.deployVerticleAwait("frequencycap.AppInMem")
-		vertx.deployVerticleAwait("frequencycap.AppRedis")
+//		vertx.deployVerticleAwait("frequencycap.AppRedis")
 		println("Application started")
 	} catch (exception: Throwable) {
 		println("Could not start application")
