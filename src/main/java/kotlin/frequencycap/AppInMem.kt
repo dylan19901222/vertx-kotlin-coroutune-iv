@@ -122,7 +122,7 @@ class AppInMem : CoroutineVerticle() {
 					userAdLogExprByUserIdMap.remove(entry.key)
 				}
 			}
-			
+
 			val adLogExpAdIds: List<Id<Advertisement>> =
 				userAdLogExprByUserIdMap.map { entry -> entry.key }.toList()
 
@@ -132,23 +132,23 @@ class AppInMem : CoroutineVerticle() {
 			if (userAdLogHolder.containsKey(userId)) {
 				userAdLogByUserIdMap = userAdLogHolder.get(userId)
 			}
-
-			//先將有此 adId ，而使用者廣告期限紀錄卻已過期的使用者廣告行為記錄移除(重新計算)
-			userAdLogByUserIdMap.forEach { entry ->
-				if (!adLogExpAdIds.contains(entry.key)) {
-					userAdLogByUserIdMap.remove(entry.key)
-				}
-			}
-
-
+			
+			
 			//1.如使用者廣告期限紀錄不含此 adId ， 使用者廣告行為記錄不含有此 adId 表示該廣告可以用[x,x -> o]
 			//2.如使用者廣告期限紀錄含此 adId ， 使用者廣告行為記錄含有此 adId 表示該廣告可以用[o,o -> o]
-			//3.如使用者廣告期限紀錄含此 adId ， 使用者廣告行為記錄不含有此 adId 表示該廣告不可以用[x,o -> x]
-			//因為使用者廣告行為記錄超過該廣告使用次數會被移除，但使用者廣告期限紀錄並還沒到時間，故上面條件3是不可使用的狀況
-			val resultList: List<Advertisement> =
-				adList.filter { ad ->
-					!(adLogExpAdIds.contains(ad._id).xor(userAdLogByUserIdMap.containsKey(ad._id)))
-				}.toList()
+			//3.如使用者廣告期限紀錄含此 adId ， 使用者廣告行為記錄不含有此 adId 表示該廣告不可以用[o,x -> x]
+			//4.如使用者廣告期限紀錄不含此 adId ， 使用者廣告行為記錄含有此 adId 表示該廣告可以用[x,o -> o]
+			//，但必須移除使用者廣告行為記錄，使重新計算
+			val resultList: MutableList<Advertisement> = mutableListOf()
+			for (ad in adList) {
+				if (adLogExpAdIds.contains(ad._id) && !userAdLogByUserIdMap.containsKey(ad._id)) {
+					continue
+				}
+				if (!adLogExpAdIds.contains(ad._id) && userAdLogByUserIdMap.containsKey(ad._id)) {
+					userAdLogByUserIdMap.remove(ad._id)
+				}
+				resultList.add(ad)
+			}
 
 			//如果沒廣告可播放回傳404
 			if (resultList.size == 0) {
